@@ -1,0 +1,6 @@
+{
+  "database": {
+    "dialect": "sqlite",
+    "storage": "./vault.db"
+  }
+}

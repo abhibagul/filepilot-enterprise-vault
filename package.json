@@ -1,0 +1,32 @@
+{
+  "name": "filepilot-enterprise-vault",
+  "version": "1.0.0",
+  "description": "FilePilot Corporate Vault Integration Microservice. Simulates/proxies HashiCorp Vault API and serves encrypted Connection Profiles with security audit logging and BYOK KMS support.",
+  "main": "server.cjs",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-kms": "^3.1079.0",
+    "@azure/identity": "^4.13.1",
+    "@azure/keyvault-keys": "^4.10.2",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "mysql2": "^3.22.5",
+    "pg": "^8.22.0",
+    "sequelize": "^6.37.8",
+    "sqlite3": "^6.0.1",
+    "ws": "^8.21.0"
+  },
+  "keywords": [
+    "filepilot",
+    "vault",
+    "microservice",
+    "kms",
+    "security",
+    "audit-log"
+  ],
+  "author": "FilePilot Team",
+  "license": "UNLICENSED"
+}

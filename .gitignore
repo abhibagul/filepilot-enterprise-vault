@@ -1,0 +1,29 @@
+# Node dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Encryption and security sensitive files
+.vault_key
+.vault_key.backup
+.vault_key.bak
+config.json
+config.json.backup
+config.json.bak
+db.json.bak
+
+# Database files
+vault.db
+vault.db.backup
+vault.db-journal
+vault.db-shm
+vault.db-wal
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/

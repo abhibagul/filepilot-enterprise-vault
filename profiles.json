@@ -1,0 +1,33 @@
+[
+  {
+    "name": "Corp SFTP Backup",
+    "protocol": "sftp",
+    "host": "sftp.corp.internal",
+    "port": 22,
+    "username": "backup_operator",
+    "password": "secure_sftp_password",
+    "tags": [
+      "enterprise",
+      "sftp",
+      "backup"
+    ],
+    "options": {
+      "timeout": "30"
+    }
+  },
+  {
+    "name": "Corp S3 Hot Cache",
+    "protocol": "s3",
+    "host": "s3.us-east-1.amazonaws.com",
+    "username": "AKIAIOSFODNN7EXAMPLE",
+    "password": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    "tags": [
+      "enterprise",
+      "s3",
+      "hot-cache"
+    ],
+    "options": {
+      "bucket": "corp-filepilot-hot"
+    }
+  }
+]
