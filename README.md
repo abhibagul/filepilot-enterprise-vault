@@ -1,9 +1,26 @@
-# FilePilot — Corporate Vault Integration Microservice
+# <img src="https://raw.githubusercontent.com/abhibagul/filepilot-enterprise-vault/refs/heads/main/admin/enterprise.png" width="auto" height="30" valign="middle" /> <span>   </span>   <a href="https://abhibagul.github.io/filepilot/enterprise.html" target="_blank">FilePilot Enterprise Vault</a>
 
 [![Docker Image](https://img.shields.io/badge/docker-ready-blue.svg?logo=docker)](https://hub.docker.com/)
 [![License](https://img.shields.io/badge/License-UNLICENSED-red.svg)](#)
 
-This microservice simulates or proxies a HashiCorp Vault server, allowing organizations to securely serve Connection Profiles to FilePilot clients over their intranet. It is designed to act as an enterprise config server, managing Key Encryption Keys (KEK), Data Encryption Keys (DEK), and compliance-checked remote connection configurations.
+This microservice serves as the secure, centralized configuration and credential vault for FilePilot clients. It manages server access, encryption keys, real-time revokes, and compliance-checked remote connection configurations.
+
+<img src="https://abhibagul.github.io/filepilot/enterprise/dashboard.jpg" alt="FilePilot Enterprise"/>
+
+---
+
+## ✨ Key Features & Solutions
+
+The FilePilot Enterprise Vault provides centralized server access, encryption, compliance posture tracking, and logging for enterprise teams:
+
+* **🔑 Centralized Access Control & Server Sharing**: Share server credentials (SFTP, FTP, FTPS, SCP, S3, WebDAV) with your team without exposing raw passwords or private keys. Enforce 4 built-in roles (Admin, Manager, Operator, Auditor) with over 20+ fine-grained permissions.
+* **🛡️ Cryptographic Envelope Encryption**: Secure credentials at rest using two-tier envelope encryption. A Master KEK wraps per-Vault-Group Data Encryption Keys (DEKs) using AES-256-GCM.
+* **🔌 Bring-Your-Own-KMS (BYOK)**: Offload encryption key wrapping and unwrapping to your own customer-managed KMS systems (AWS KMS or Azure Key Vault).
+* **🔗 Tamper-Evident Cryptographic Audit Trail**: Keep a secure log of every login, config change, and file sync. Logs are cryptographically chained using SHA-256 hashes, making unauthorized edits immediately visible.
+* **📊 SIEM Webhook Integration**: Stream real-time audit logs to your SIEM system (Splunk, ELK, Datadog) using HMAC-SHA256 authenticated payloads with retry-backoff policies.
+* **⚖️ Legal & Preservation Holds**: Freeze Vault Groups during regulatory or security investigations, blocking token deletions and credential updates while preserving all logs.
+* **🕒 Real-Time Client Revert & Synchronization**: Active desktop clients stay connected via WebSockets. Revoke tokens, revert files, or update policies, and the changes apply within seconds.
+* **📈 Auditor-Ready Compliance Dashboard**: Inspect encryption histories, active session states, IP allowlists, and log integrity verifications in a single five-panel posture overview.
 
 ---
 
@@ -140,7 +157,7 @@ This repository includes a preconfigured GitHub Actions workflow in `.github/wor
 
 ## 🔒 Bring Your Own KMS (BYOK)
 
-The Corporate Vault microservice supports Bring-Your-Own-KMS (BYOK) configurations. Enterprise administrators can offload Key Encryption Key (KEK) management and remote wrap/unwrap operations to their own customer-managed KMS systems (AWS KMS, Azure Key Vault, or HashiCorp Vault).
+The Corporate Vault microservice supports Bring-Your-Own-KMS (BYOK) configurations. Enterprise administrators can offload Key Encryption Key (KEK) management and remote wrap/unwrap operations to their own customer-managed KMS systems (AWS KMS or Azure Key Vault).
 
 ### Supported KMS Providers & Configuration
 
@@ -165,16 +182,6 @@ Performs `wrapKey` and `unwrapKey` operations using an Azure Key Vault RSA key (
   * `tenantId`: Azure AD Tenant ID.
   * `clientId`: Client App Registration ID.
   * `clientSecret`: Client Secret.
-
-#### 4. HashiCorp Vault (`hashicorp-vault`)
-Uses HashiCorp Vault's **Transit Secrets Engine** `encrypt` and `decrypt` endpoints over HTTP.
-* **Non-secret Configuration (`kms_config`):**
-  * `vaultAddr`: The address of the Vault server (e.g. `https://vault.corp.internal:8200`).
-  * `transitKeyName`: Transit engine key name.
-* **Credentials (`kms_credentials`):**
-  * `vaultToken`: Vault access token.
-  * `roleId`: AppRole Role ID.
-  * `secretId`: AppRole Secret ID.
 
 ---
 
