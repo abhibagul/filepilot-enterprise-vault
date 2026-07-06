@@ -98,9 +98,9 @@ async function run() {
     await new Promise(r => setTimeout(r, 2000));
 
     assert.ok(wsClosed, "WebSocket should have closed automatically on token revocation");
-    const revokeMsg = wsMessages.find(m => m.type === 'revoked');
-    assert.ok(revokeMsg, "WebSocket must have received a 'revoked' payload before closing");
-    console.log("✅ WebSocket connection terminated with 'revoked' payload.");
+    const revokeMsg = wsMessages.find(m => m.type === 'access_suspended');
+    assert.ok(revokeMsg, "WebSocket must have received an 'access_suspended' payload before closing");
+    console.log("✅ WebSocket connection terminated with 'access_suspended' payload.");
 
     console.log("--- 5. Verifying Subsequent Sync Attempts Fail ---");
     const syncResAfterRevocation = await fetch(syncUrl, {

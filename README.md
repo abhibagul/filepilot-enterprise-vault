@@ -12,7 +12,7 @@ This microservice simulates or proxies a HashiCorp Vault server, allowing organi
 Before deploying this microservice in a production environment, ensure the following security requirements are met:
 * **Production Database:** Do **NOT** use SQLite for production. Deploy using **PostgreSQL** or **MySQL** to enable proper database-level deletion prevention triggers. Restrict database user privileges (revoke `DELETE` / `DROP` / `TRUNCATE` privileges on audit logs).
 * **Master Encryption Key:** Always set the `VAULT_MASTER_KEY` environment variable as a 256-bit hex/base64 string. Never rely on the auto-generated `.vault_key` file-based fallback on disk in a containerized environment, as containers are ephemeral.
-* **Default Credentials:** Always run the Setup Wizard (`/admin/install.html` on first boot) to establish a strong custom admin password. If default `admin`/`vault-admin-pass` credentials are ever initialized, change them immediately in the admin settings console.
+* **Default Credentials:** Always run the Setup Wizard (either via the CLI `npx filepilot-enterprise-vault init` or via the Web UI at `/admin/install.html` on first boot) to establish a strong custom admin password. If default `admin`/`vault-admin-pass` credentials are ever initialized, change them immediately in the admin settings console.
 * **Network Security (TLS/HTTPS):** Run the microservice behind a reverse proxy (e.g., Nginx, Cloudflare, AWS ALB) configured for HTTPS/TLS to protect credentials and tokens in transit.
 * **IP Allowlisting:** Configure strict IP allowlists for all Vault Groups to restrict client synchronization access to designated enterprise subnets and VPN endpoints.
 
@@ -30,7 +30,7 @@ Before deploying this microservice in a production environment, ensure the follo
    ```bash
    npm start
    ```
-   The server will start listening on port `8200`.
+   The server will start listening on port `8200` (or the port specified by the `PORT` env var).
 
 ---
 
@@ -44,34 +44,35 @@ docker build -t filepilot-enterprise-vault:latest .
 ```
 
 #### 2. Run the Container
-Run the container and map port `8200` to your host machine:
+Run the container mapping port `8443` on the host to port `8443` in the container, passing the master key, and persistent volume mount:
 ```bash
 docker run -d \
-  -p 8200:8200 \
+  -p 8443:8443 \
   -e VAULT_MASTER_KEY="your-super-secret-256-bit-hex-key" \
-  -v filepilot-vault-data:/app/data \
-  --name filepilot-vault \
-  filepilot-enterprise-vault:latest
-```
-
-> [!NOTE]
-> If you are using the default SQLite backend, it is recommended to map a Docker volume or local directory to mount the database persistently. To change the SQLite database location, configure it through the admin setup page (`/admin/install.html`) on first launch.
-
-#### 3. Docker Compose Configuration (`docker-compose.yml`)
-To orchestrate the vault microservice with a Postgres database for enterprise production, configure `docker-compose.yml` as follows:
-
-```yaml
-version: '3.8'
-
-services:
-  vault:
-    image: filepilot-enterprise-vault:latest
+  -v ./data:/app/data \
+    --name filepilot-vault \
+    abbybagul/filepilot-enterprise-vault:latest
+  ```
+  
+  > [!NOTE]
+  > Mounting `./data` or a Docker volume to `/app/data` ensures that the configuration, SQLite database, and backups persist across container lifecycles.
+  
+  #### 3. Docker Compose Configuration (`docker-compose.yml`)
+  To orchestrate the vault microservice with a Postgres database for enterprise production, configure `docker-compose.yml` as follows:
+  
+  ```yaml
+  version: '3.8'
+  
+  services:
+    vault:
+      image: abbybagul/filepilot-enterprise-vault:latest
     build: .
     ports:
-      - "8200:8200"
+      - "8443:8443"
     environment:
-      - PORT=8200
+      - PORT=8443
       - NODE_ENV=production
+      - VAULT_DATA_DIR=/app/data
       - VAULT_MASTER_KEY=4a6f6e617468616e206973206120736563726574206b65792121212121212121
     volumes:
       - vault_data:/app/data
@@ -91,6 +92,36 @@ volumes:
   vault_data:
   postgres_data:
 ```
+
+---
+
+### Method 3: NPM & NPX Setup (CLI)
+
+You can run the vault microservice directly using `npx` or install it globally from NPM:
+
+#### Option A: Run directly with NPX (No installation required)
+1. **Run the Setup Wizard**:
+   ```bash
+   npx filepilot-enterprise-vault init
+   ```
+2. **Start the Server**:
+   ```bash
+   npx filepilot-enterprise-vault start
+   ```
+
+#### Option B: Install Globally from NPM
+1. **Install Globally**:
+   ```bash
+   npm install -g filepilot-enterprise-vault
+   ```
+2. **Run the Setup Wizard**:
+   ```bash
+   filepilot-enterprise-vault init
+   ```
+3. **Start the Server**:
+   ```bash
+   filepilot-enterprise-vault start
+   ```
 
 ---
 

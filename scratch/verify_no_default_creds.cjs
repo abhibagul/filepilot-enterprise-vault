@@ -16,6 +16,14 @@ async function runTests() {
     if (fs.existsSync(configPath)) {
       try { fs.unlinkSync(configPath); } catch (e) {}
     }
+    const envPath = path.join(__dirname, '..', '.env');
+    if (fs.existsSync(envPath)) {
+      try { fs.unlinkSync(envPath); } catch (e) {}
+    }
+    const rootDbJsonPath = path.join(__dirname, '..', 'db.json');
+    if (fs.existsSync(rootDbJsonPath)) {
+      try { fs.unlinkSync(rootDbJsonPath); } catch (e) {}
+    }
   };
 
   cleanupFiles();
@@ -119,6 +127,19 @@ async function runTests() {
   fs.writeFileSync(configPath, JSON.stringify({
     database: { dialect: 'sqlite', storage: testDbPath }
   }));
+
+  // Write temporary db.json with mock token for SEED_DEV_TOKENS test
+  const rootDbJsonPath = path.join(__dirname, '..', 'db.json');
+  fs.writeFileSync(rootDbJsonPath, JSON.stringify({
+    tokens: [
+      {
+        token: "dev-token-xyz123",
+        user: "developer",
+        groupId: "dev-group-id",
+        status: "active"
+      }
+    ]
+  }, null, 2), 'utf8');
 
   process.env.SEED_DEV_TOKENS = 'true';
 

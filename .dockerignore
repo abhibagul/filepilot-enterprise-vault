@@ -1,0 +1,12 @@
+node_modules/
+npm-debug.log*
+.git/
+.github/
+.vscode/
+.idea/
+.env
+vault.db
+*.db
+*.db-journal
+backups/
+scratch/

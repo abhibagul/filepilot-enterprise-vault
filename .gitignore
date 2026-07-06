@@ -19,6 +19,8 @@ vault.db.backup
 vault.db-journal
 vault.db-shm
 vault.db-wal
+*.db
+*.db-journal
 
 # OS files
 .DS_Store
@@ -27,3 +29,5 @@ Thumbs.db
 # IDEs
 .vscode/
 .idea/
+.env
+backups/

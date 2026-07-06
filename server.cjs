@@ -126,9 +126,12 @@ const loginAttempts = new Map();
 app.use(cors());
 app.use(express.json());
 
-const KEY_FILE = path.join(__dirname, '.vault_key');
-const configPath = path.join(__dirname, 'config.json');
+const DATA_DIR = process.env.VAULT_DATA_DIR || process.cwd();
+const KEY_FILE = path.join(DATA_DIR, '.vault_key');
+const configPath = process.env.VAULT_CONFIG_PATH || path.join(DATA_DIR, 'config.json');
 let encryptionKey;
+let activeHttpServer;
+let activeWss;
 
 // WebSockets connected clients mapping: token string -> WebSocket connection
 const clients = new Map();
@@ -740,7 +743,7 @@ app.get('/healthz', async (req, res) => {
 // Check if installation is complete helper (async to verify admin user exists)
 const checkIsInstalled = async () => {
   const hasKey = !!process.env.VAULT_MASTER_KEY || fs.existsSync(KEY_FILE);
-  const hasConfig = fs.existsSync(configPath);
+  const hasConfig = !!process.env.DB_DIALECT || fs.existsSync(configPath);
   if (!hasKey || !hasConfig) return false;
   try {
     const adminCount = await User.count({ where: { role: 'admin' } });
@@ -771,7 +774,7 @@ app.post('/admin/api/install/test-db', async (req, res) => {
     if (dialect === 'sqlite') {
       tempSequelize = new Sequelize({
         dialect: 'sqlite',
-        storage: storage || path.join(__dirname, 'vault.db'),
+        storage: storage || path.join(DATA_DIR, 'vault.db'),
         logging: false
       });
     } else if (dialect === 'postgres') {
@@ -830,56 +833,133 @@ app.post('/admin/api/install/submit', async (req, res) => {
   } = req.body;
 
   try {
-    // 1. Write Encryption Key File
-    let keyBuffer;
+    // 1. Resolve master key string representation
+    let masterKeyStr;
     if (keyMode === 'custom') {
-      keyBuffer = Buffer.from(customKey, 'utf8');
+      masterKeyStr = customKey;
     } else {
-      keyBuffer = crypto.randomBytes(32);
+      masterKeyStr = crypto.randomBytes(32).toString('hex');
     }
-    fs.writeFileSync(KEY_FILE, keyBuffer);
-    encryptionKey = keyBuffer;
+    
+    // Parse key to set the in-memory encryptionKey variable
+    if (masterKeyStr.length === 64 && /^[0-9a-fA-F]+$/.test(masterKeyStr)) {
+      encryptionKey = Buffer.from(masterKeyStr, 'hex');
+    } else if (masterKeyStr.length === 44 && /^[0-9a-zA-Z+/=]+$/.test(masterKeyStr)) {
+      encryptionKey = Buffer.from(masterKeyStr, 'base64');
+    } else {
+      encryptionKey = Buffer.from(masterKeyStr, 'utf8');
+    }
 
-    // 2. Write database credentials to config.json
-    const configData = {
-      database: {
-        dialect: dbDialect,
-        host: dbHost,
-        port: dbPort,
-        username: dbUsername,
-        password: dbPassword,
-        database: dbName,
-        storage: dbStorage
-      }
-    };
-    fs.writeFileSync(configPath, JSON.stringify(configData, null, 2), 'utf8');
+    // 2. Write all configuration parameters to .env file
+    const envContent = [
+      `# FilePilot Corporate Vault Environment Configuration`,
+      `VAULT_MASTER_KEY=${masterKeyStr}`,
+      `DB_DIALECT=${dbDialect}`,
+      `DB_HOST=${dbHost || 'localhost'}`,
+      `DB_PORT=${dbPort || ''}`,
+      `DB_USERNAME=${dbUsername || ''}`,
+      `DB_PASSWORD=${dbPassword || ''}`,
+      `DB_NAME=${dbName || ''}`,
+      `DB_STORAGE=${dbStorage || ''}`,
+      `DB_SSL=false`
+    ].join('\n');
+    
+    const envFilePath = path.join(DATA_DIR, '.env');
+    fs.writeFileSync(envFilePath, envContent, 'utf8');
+    
+    // Clean up any legacy configuration files if they exist to avoid confusion
+    if (fs.existsSync(configPath)) {
+      try { fs.unlinkSync(configPath); } catch (_) {}
+    }
+    if (fs.existsSync(KEY_FILE)) {
+      try { fs.unlinkSync(KEY_FILE); } catch (_) {}
+    }
+
+    // Set the loaded environment variables in the active process
+    process.env.VAULT_MASTER_KEY = masterKeyStr;
+    process.env.DB_DIALECT = dbDialect;
+    process.env.DB_HOST = dbHost || 'localhost';
+    if (dbPort) process.env.DB_PORT = String(dbPort);
+    if (dbUsername) process.env.DB_USERNAME = dbUsername;
+    if (dbPassword) process.env.DB_PASSWORD = dbPassword;
+    if (dbName) process.env.DB_NAME = dbName;
+    if (dbStorage) process.env.DB_STORAGE = dbStorage;
+    process.env.DB_SSL = 'false';
 
     // 3. Dynamically re-connect and synchronize Sequelize models on the target database
-    const dbConfig = configData.database;
-    updateDbConnection(dbConfig);
+    console.log('[Setup] Loading fresh database module to apply configuration...');
+    try {
+      const dbPath = require.resolve('./db.cjs');
+      delete require.cache[dbPath];
+    } catch (_) {}
+    const db = require('./db.cjs');
+
+    db.updateDbConnection({
+      dialect: dbDialect,
+      host: dbHost,
+      port: dbPort,
+      username: dbUsername,
+      password: dbPassword,
+      database: dbName,
+      storage: dbStorage,
+      ssl: false
+    });
     
     // Initialize database, run migrations and sync models
-    await initDb();
+    await db.initDb();
 
     // 4. Seed Admin user
     const adminHash = crypto.createHash('sha256').update(adminPassword).digest('hex');
-    let adminUser = await User.findOne({ where: { username: 'admin' } });
+    let adminUser = await db.User.findOne({ where: { username: 'admin' } });
     if (adminUser) {
       adminUser.passwordHash = adminHash;
       await adminUser.save();
     } else {
-      adminUser = await User.create({
+      await db.User.create({
         username: 'admin',
         passwordHash: adminHash,
         role: 'admin'
       });
     }
 
-    // Initialize default configs
-    await SystemConfig.findOrCreate({ where: { key: 'siem_webhook_url' }, defaults: { value: '' } });
-    await SystemConfig.findOrCreate({ where: { key: 'audit_logging_enabled' }, defaults: { value: 'true' } });
+    // 5. Seed default configurations
+    await db.SystemConfig.findOrCreate({ where: { key: 'siem_webhook_url' }, defaults: { value: '' } });
+    await db.SystemConfig.findOrCreate({ where: { key: 'siem_webhook_secret' }, defaults: { value: crypto.randomBytes(32).toString('hex') } });
+    await db.SystemConfig.findOrCreate({ where: { key: 'audit_logging_enabled' }, defaults: { value: 'true' } });
 
     res.json({ success: true });
+    
+    console.log("[Setup] Installation successful. Restarting server to apply new configuration...");
+    setTimeout(() => {
+      if (activeWss) {
+        try { activeWss.close(); } catch (_) {}
+      }
+      if (activeHttpServer) {
+        try {
+          if (typeof activeHttpServer.closeAllConnections === 'function') {
+            activeHttpServer.closeAllConnections();
+          }
+          activeHttpServer.close(() => {
+            const isServerOrCli = process.argv[1] && (process.argv[1].endsWith('server.cjs') || process.argv[1].endsWith('cli.js'));
+            if (isServerOrCli) {
+              const { spawn } = require('child_process');
+              const child = spawn(process.argv[0], process.argv.slice(1), {
+                stdio: 'inherit'
+              });
+              child.on('close', (code) => {
+                process.exit(code || 0);
+              });
+            } else {
+              process.exit(0);
+            }
+          });
+        } catch (_) {
+          process.exit(0);
+        }
+      } else {
+        process.exit(0);
+      }
+    }, 1000);
   } catch (err) {
     console.error("Installation failed:", err);
     res.status(500).json({ error: err.message });
@@ -1440,7 +1520,7 @@ app.post('/admin/api/maintenance/clear-backups', authMiddleware, requirePermissi
     }
     
     // Clean up empty connection subdirectories
-    const backupsDir = path.join(__dirname, 'backups');
+    const backupsDir = path.join(DATA_DIR, 'backups');
     if (fs.existsSync(backupsDir)) {
       try {
         const dirs = fs.readdirSync(backupsDir);
@@ -2110,20 +2190,28 @@ app.post('/admin/api/config/db', authMiddleware, requirePermission('system.confi
     defaultDatabase = 'vault';
   }
 
-  const newConfig = {
-    database: {
-      dialect,
-      storage: storage || path.join(__dirname, 'vault.db'),
-      host: host || 'localhost',
-      port: port ? parseInt(port) : defaultPort,
-      username: username || defaultUsername,
-      password: password || '',
-      database: database || defaultDatabase,
-      ssl: !!ssl
-    }
-  };
+  const currentMasterKey = process.env.VAULT_MASTER_KEY || '';
 
-  fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2), 'utf8');
+  const envContent = [
+    `# FilePilot Corporate Vault Environment Configuration`,
+    `VAULT_MASTER_KEY=${currentMasterKey}`,
+    `DB_DIALECT=${dialect}`,
+    `DB_HOST=${host || 'localhost'}`,
+    `DB_PORT=${port ? parseInt(port) : defaultPort}`,
+    `DB_USERNAME=${username || ''}`,
+    `DB_PASSWORD=${password || ''}`,
+    `DB_NAME=${database || defaultDatabase}`,
+    `DB_STORAGE=${storage || path.join(DATA_DIR, 'vault.db')}`,
+    `DB_SSL=${ssl ? 'true' : 'false'}`
+  ].join('\n');
+
+  const envFilePath = path.join(DATA_DIR, '.env');
+  fs.writeFileSync(envFilePath, envContent, 'utf8');
+
+  // Clean up legacy files to avoid confusion
+  if (fs.existsSync(configPath)) {
+    try { fs.unlinkSync(configPath); } catch (_) {}
+  }
   await addAuditLog(
     req.adminUser.username,
     JSON.stringify({
@@ -2255,10 +2343,23 @@ app.get('/admin/api/state', authMiddleware, async (req, res) => {
       : ['id', 'username', 'role', 'createdAt']
   });
 
-  let configJson = { database: { dialect: 'sqlite', storage: './vault.db' } };
+  let configJson = {
+    database: {
+      dialect: process.env.DB_DIALECT || 'sqlite',
+      host: process.env.DB_HOST || 'localhost',
+      port: process.env.DB_PORT ? parseInt(process.env.DB_PORT) || '' : '',
+      username: process.env.DB_USERNAME || '',
+      database: process.env.DB_NAME || '',
+      storage: process.env.DB_STORAGE || '',
+      ssl: process.env.DB_SSL === 'true'
+    }
+  };
   if (fs.existsSync(configPath)) {
     try {
-      configJson = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (parsed && parsed.database) {
+        configJson.database = { ...configJson.database, ...parsed.database };
+      }
     } catch {}
   }
 
@@ -3090,7 +3191,7 @@ app.post('/v1/files/version', async (req, res) => {
   const nextVerNum = lastVersion ? lastVersion.version + 1 : 1;
 
   // Save previous version content to backup path
-  const backupDir = path.join(__dirname, 'backups', connectionId);
+  const backupDir = path.join(DATA_DIR, 'backups', connectionId);
   fs.mkdirSync(backupDir, { recursive: true });
   
   const backupFileName = `${Buffer.from(filePath).toString('hex')}_v${nextVerNum}.bak`;
@@ -3396,10 +3497,11 @@ app.use('/admin', async (req, res, next) => {
 }, express.static(path.join(__dirname, 'admin')));
 
 // Boot server after database initialization (if configured)
-if (require.main === module) {
+if (require.main === module || process.env.RUN_VAULT_SERVER === 'true') {
   const bootServer = async () => {
     const hasKey = !!process.env.VAULT_MASTER_KEY || fs.existsSync(KEY_FILE);
-    const hasConfig = fs.existsSync(configPath);
+    const hasConfig = !!process.env.DB_DIALECT || fs.existsSync(configPath);
+    
     if (hasKey && hasConfig) {
       console.log("Vault is configured. Initializing database...");
       await initDb();
@@ -3407,14 +3509,15 @@ if (require.main === module) {
       console.log("Vault is not configured. Starting in setup wizard mode...");
     }
 
-    const server = app.listen(PORT, () => {
+    activeHttpServer = app.listen(PORT, () => {
       console.log(`FilePilot Corporate Vault Server running on port ${PORT}`);
       console.log(`Admin Portal: http://localhost:${PORT}/admin`);
       console.log(`Sync URL: http://localhost:${PORT}/v1/secret/data/filepilot/profiles`);
     });
 
   // Setup WebSocket server
-  const wss = new WebSocketServer({ server });
+  activeWss = new WebSocketServer({ server: activeHttpServer });
+  const wss = activeWss;
 
   const keepaliveInterval = setInterval(() => {
     wss.clients.forEach(ws => {
@@ -3607,9 +3710,11 @@ function notifyTokenSuspension(tokenVal) {
     try {
       console.log(`[WS] Sending 'access_suspended' message to client with token: ${tokenVal}`);
       ws.send(JSON.stringify({ type: "access_suspended" }));
+      ws.close();
     } catch (e) {
       console.error("[WS] Failed to send WebSocket suspension message:", e);
     }
+    clients.delete(tokenVal);
   }
 }
 

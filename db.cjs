@@ -2,16 +2,78 @@ const { Sequelize, DataTypes } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
 
-const configPath = process.env.VAULT_CONFIG_PATH || path.join(__dirname, 'config.json');
+const DATA_DIR = process.env.VAULT_DATA_DIR || process.cwd();
+
+// Load environment variables from .env if present in DATA_DIR
+const envPath = path.join(DATA_DIR, '.env');
+console.log(`[DB] DATA_DIR resolved to: ${DATA_DIR}`);
+console.log(`[DB] Checking for .env file at: ${envPath} (Exists: ${fs.existsSync(envPath)})`);
+if (fs.existsSync(envPath)) {
+  try {
+    const content = fs.readFileSync(envPath, 'utf8');
+    content.split(/\r?\n/).forEach(line => {
+      const parts = line.split('=');
+      if (parts.length >= 2) {
+        const key = parts[0].trim();
+        const val = parts.slice(1).join('=').trim().replace(/^['"]|['"]$/g, '');
+        if (key && !key.startsWith('#')) {
+          console.log(`[DB] Setting process.env.${key} from .env file`);
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Failed to load .env file:", err);
+  }
+}
+
+const configPath = process.env.VAULT_CONFIG_PATH || path.join(DATA_DIR, 'config.json');
 
 // Default database configuration (embedded SQLite fallback on first boot)
 let dbConfig = {
   dialect: 'sqlite',
-  storage: path.join(__dirname, 'vault.db'),
+  storage: path.join(DATA_DIR, 'vault.db'),
   logging: false
 };
 
-if (fs.existsSync(configPath)) {
+if (process.env.DB_DIALECT) {
+  const dialect = process.env.DB_DIALECT;
+  if (dialect === 'postgres') {
+    dbConfig = {
+      dialect: 'postgres',
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT) || 5432,
+      username: process.env.DB_USERNAME,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      logging: false,
+      dialectOptions: (process.env.DB_SSL === 'true') ? {
+        ssl: {
+          require: true,
+          rejectUnauthorized: false
+        }
+      } : {}
+    };
+  } else if (dialect === 'mysql') {
+    dbConfig = {
+      dialect: 'mysql',
+      host: process.env.DB_HOST || 'localhost',
+      port: parseInt(process.env.DB_PORT) || 3306,
+      username: process.env.DB_USERNAME,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      logging: false
+    };
+  } else {
+    dbConfig = {
+      dialect: 'sqlite',
+      storage: process.env.DB_STORAGE || path.join(DATA_DIR, 'vault.db'),
+      logging: false
+    };
+  }
+} else if (fs.existsSync(configPath)) {
   try {
     const raw = fs.readFileSync(configPath, 'utf8');
     const parsed = JSON.parse(raw);
@@ -45,7 +107,7 @@ if (fs.existsSync(configPath)) {
       } else {
         dbConfig = {
           dialect: 'sqlite',
-          storage: parsed.database.storage || path.join(__dirname, 'vault.db'),
+          storage: parsed.database.storage || path.join(DATA_DIR, 'vault.db'),
           logging: false
         };
       }
@@ -559,7 +621,7 @@ async function initDb() {
 
   // Enforce DB-level delete prevention triggers on TransferLogs
   try {
-    const dialect = sequelize.getDialect();
+    const dialect = (sequelize.connectionManager && sequelize.connectionManager.dialectName) || sequelize.getDialect();
     if (dialect === 'sqlite') {
       await sequelize.query(`
         CREATE TRIGGER IF NOT EXISTS prevent_delete_transferlog
@@ -654,7 +716,7 @@ async function initDb() {
 
   // One-time migration from db.json if tables are empty
   const groupCount = await VaultGroup.count();
-  const dbJsonPath = path.join(__dirname, 'db.json');
+  const dbJsonPath = path.join(DATA_DIR, 'db.json');
   if (fs.existsSync(dbJsonPath)) {
     try {
       const rawJson = fs.readFileSync(dbJsonPath, 'utf8');
@@ -773,7 +835,7 @@ async function initDb() {
             return Buffer.from(envKey, 'utf8');
           }
         }
-        const keyPath = path.join(__dirname, '.vault_key');
+        const keyPath = path.join(DATA_DIR, '.vault_key');
         if (fs.existsSync(keyPath)) {
           const fileKey = fs.readFileSync(keyPath).toString('utf8').trim();
           if (fileKey.length === 64 && /^[0-9a-fA-F]+$/.test(fileKey)) {

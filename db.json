@@ -1,0 +1,10 @@
+{
+  "tokens": [
+    {
+      "token": "dev-token-xyz123",
+      "user": "developer",
+      "groupId": "dev-group-id",
+      "status": "active"
+    }
+  ]
+}

@@ -3,7 +3,7 @@ const crypto = require('crypto');
 function isMockKms(providerConfig) {
   if (!providerConfig) return true;
   const str = JSON.stringify(providerConfig).toLowerCase();
-  return str.includes('mock') || str.includes('test') || str.includes('dummy') || str.includes('simulated') || process.env.KMS_SIMULATION === 'true';
+  return str.includes('mock') || str.includes('dummy') || str.includes('simulated') || process.env.KMS_SIMULATION === 'true';
 }
 
 // Local provider wrap/unwrap helpers
@@ -130,8 +130,12 @@ const providers = {
         return Buffer.from(response.Plaintext);
       } catch (err) {
         console.warn(`[KMS Simulation] AWS KMS unwrap failed, falling back to simulated KEK. Error: ${err.message}`);
-        const simulatedKek = crypto.createHash('sha256').update(providerConfig.keyArn || 'mock-key-arn').digest();
-        return unwrapDekLocal(wrappedDek, simulatedKek);
+        try {
+          const simulatedKek = crypto.createHash('sha256').update(providerConfig.keyArn || 'mock-key-arn').digest();
+          return unwrapDekLocal(wrappedDek, simulatedKek);
+        } catch (localErr) {
+          throw new Error(`AWS KMS: Decrypt failed - ${err.message}`);
+        }
       }
     },
     testConnection: async (providerConfig) => {
@@ -216,8 +220,12 @@ const providers = {
         return Buffer.from(unwrapResult.result);
       } catch (err) {
         console.warn(`[KMS Simulation] Azure Key Vault unwrap failed, falling back to simulated KEK. Error: ${err.message}`);
-        const simulatedKek = crypto.createHash('sha256').update((providerConfig.vaultUrl || 'mock-vault-url') + '/' + (providerConfig.keyName || 'mock-key')).digest();
-        return unwrapDekLocal(wrappedDek, simulatedKek);
+        try {
+          const simulatedKek = crypto.createHash('sha256').update((providerConfig.vaultUrl || 'mock-vault-url') + '/' + (providerConfig.keyName || 'mock-key')).digest();
+          return unwrapDekLocal(wrappedDek, simulatedKek);
+        } catch (localErr) {
+          throw new Error(`Azure Key Vault: Decrypt failed - ${err.message}`);
+        }
       }
     },
     testConnection: async (providerConfig) => {
